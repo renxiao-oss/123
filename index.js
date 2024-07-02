@@ -1,62 +1,108 @@
-// Require necessary modules
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const shortid = require('shortid'); // Add shortid module
+const bodyParser = require('body-parser');
+require('dotenv').config();
 
-// Create Express app
 const app = express();
-
-// Basic Configuration
-const port = process.env.PORT || 3000;
-
-// Middleware
 app.use(cors());
-app.use(express.json()); // To parse JSON bodies
-app.use(express.urlencoded({ extended: true })); // To parse URL-encoded bodies
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+app.use(express.static('public'));
 
-// Array to store URL objects
-let urls = [];
-
-// Routes
-app.get('/', function(req, res) {
+app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
-// POST endpoint to shorten URL
-app.post('/api/shorturl', function(req, res) {
-  const { url } = req.body;
+let users = [];
+let exercises = [];
 
-  // Validate URL format
-  const urlPattern = /^(http|https):\/\/[^ "]+$/;
-  if (!urlPattern.test(url)) {
-    return res.json({ error: 'invalid url' });
-  }
+// 生成唯一ID的简单函数
+const generateId = () => Math.random().toString(36).substr(2, 9);
 
-  // Create short URL object
-  const shortUrl = {
-    original_url: url,
-    short_url: shortid.generate() // Generate a short ID for short URL
+// 创建新用户
+app.post('/api/users', (req, res) => {
+  const { username } = req.body;
+  const newUser = {
+    username,
+    _id: generateId(),
   };
-
-  // Store short URL object
-  urls.push(shortUrl);
-
-  // Response with short URL object
-  res.json(shortUrl);
+  users.push(newUser);
+  res.json(newUser);
 });
 
-// GET endpoint to redirect short URL
-app.get('/api/shorturl/:short_url', function(req, res) {
-  const { short_url } = req.params;
-  const shortUrlObj = urls.find(url => url.short_url === short_url);
-  if (!shortUrlObj) {
-    return res.json({ error: 'invalid short url' });
+// 获取所有用户列表
+app.get('/api/users', (req, res) => {
+  res.json(users);
+});
+
+// 记录用户运动
+app.post('/api/users/:_id/exercises', (req, res) => {
+  const { _id } = req.params;
+  const { description, duration, date } = req.body;
+
+  const user = users.find(u => u._id === _id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
   }
-  res.redirect(shortUrlObj.original_url);
+
+  const exercise = {
+    description,
+    duration: parseInt(duration),
+    date: date ? new Date(date).toDateString() : new Date().toDateString(),
+    _id: generateId(),
+    userId: _id,
+  };
+  
+  exercises.push(exercise);
+
+  res.json({
+    username: user.username,
+    description: exercise.description,
+    duration: exercise.duration,
+    date: exercise.date,
+    _id: user._id,
+  });
 });
 
-// Start server
-app.listen(port, function() {
-  console.log(`Server is running on port ${port}`);
+// 获取用户运动日志
+app.get('/api/users/:_id/logs', (req, res) => {
+  const { _id } = req.params;
+  const { from, to, limit } = req.query;
+
+  const user = users.find(u => u._id === _id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  let userExercises = exercises.filter(ex => ex.userId === _id);
+
+  if (from) {
+    const fromDate = new Date(from);
+    userExercises = userExercises.filter(ex => new Date(ex.date) >= fromDate);
+  }
+
+  if (to) {
+    const toDate = new Date(to);
+    userExercises = userExercises.filter(ex => new Date(ex.date) <= toDate);
+  }
+
+  if (limit) {
+    userExercises = userExercises.slice(0, parseInt(limit));
+  }
+
+  res.json({
+    _id: user._id,
+    username: user.username,
+    count: userExercises.length,
+    log: userExercises.map(ex => ({
+      description: ex.description,
+      duration: ex.duration,
+      date: ex.date,
+    })),
+  });
+});
+
+// 启动服务器
+const listener = app.listen(process.env.PORT || 3000, () => {
+  console.log('Your app is listening on port ' + listener.address().port);
 });
